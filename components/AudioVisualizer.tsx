@@ -2,88 +2,67 @@
 import React, { useEffect, useRef } from 'react';
 
 interface AudioVisualizerProps {
-  audioElement: HTMLAudioElement | null;
+  analyser: AnalyserNode | null;
 }
 
-const AudioVisualizer: React.FC<AudioVisualizerProps> = ({ audioElement }) => {
+const AudioVisualizer: React.FC<AudioVisualizerProps> = ({ analyser }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
-  const analyzerRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!audioElement || !canvasRef.current) return;
+    if (!analyser || !canvasRef.current) return;
 
-    const setupAudio = () => {
-      try {
-        if (!audioContextRef.current) {
-          audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-        }
+    const canvas = canvasRef.current;
+    const canvasCtx = canvas.getContext('2d');
+    if (!canvasCtx) return;
 
-        const ctx = audioContextRef.current;
+    analyser.fftSize = 256;
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+
+    const draw = () => {
+      animationFrameRef.current = requestAnimationFrame(draw);
+      analyser.getByteFrequencyData(dataArray);
+      
+      canvasCtx.fillStyle = '#ffffff';
+      canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      const barWidth = (canvas.width / bufferLength) * 2.5;
+      let barHeight;
+      let x = 0;
+      
+      for (let i = 0; i < bufferLength; i++) {
+        barHeight = dataArray[i] / 2.5;
         
-        // لمنع خطأ: "MediaElementAudioSourceNode already connected"
-        if (!sourceRef.current) {
-          sourceRef.current = ctx.createMediaElementSource(audioElement);
-          analyzerRef.current = ctx.createAnalyser();
-          sourceRef.current.connect(analyzerRef.current);
-          analyzerRef.current.connect(ctx.destination);
-        }
+        // Gradient color for bars
+        const gradient = canvasCtx.createLinearGradient(0, canvas.height, 0, 0);
+        gradient.addColorStop(0, '#3b82f6');
+        gradient.addColorStop(1, '#60a5fa');
+        
+        canvasCtx.fillStyle = gradient;
+        // Rounded corners for bars
+        const radius = 2;
+        canvasCtx.beginPath();
+        canvasCtx.roundRect(x, canvas.height - barHeight, barWidth, barHeight, [radius, radius, 0, 0]);
+        canvasCtx.fill();
 
-        const analyzer = analyzerRef.current!;
-        analyzer.fftSize = 256;
-        const bufferLength = analyzer.frequencyBinCount;
-        const dataArray = new Uint8Array(bufferLength);
-
-        const canvas = canvasRef.current!;
-        const canvasCtx = canvas.getContext('2d');
-        if (!canvasCtx) return;
-
-        const draw = () => {
-          animationFrameRef.current = requestAnimationFrame(draw);
-          analyzer.getByteFrequencyData(dataArray);
-          
-          canvasCtx.fillStyle = '#f8fafc';
-          canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
-          
-          const barWidth = (canvas.width / bufferLength) * 2.5;
-          let barHeight;
-          let x = 0;
-          
-          for (let i = 0; i < bufferLength; i++) {
-            barHeight = dataArray[i] / 2;
-            canvasCtx.fillStyle = '#3b82f6';
-            canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
-            x += barWidth + 1;
-          }
-        };
-
-        draw();
-      } catch (err) {
-        console.error("Audio Visualizer Error:", err);
+        x += barWidth + 2;
       }
     };
 
-    // ننتظر تشغيل الصوت لتفعيل الـ AudioContext (سياسة المتصفح)
-    audioElement.addEventListener('play', () => {
-      if (audioContextRef.current?.state === 'suspended') {
-        audioContextRef.current.resume();
-      }
-      setupAudio();
-    });
+    draw();
 
     return () => {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [audioElement]);
+  }, [analyser]);
 
   return (
     <canvas 
       ref={canvasRef} 
-      className="w-full h-16 rounded-xl bg-slate-50 border border-slate-100 shadow-inner"
+      className="w-full h-16 rounded-2xl bg-white border border-slate-100 shadow-inner"
       width={600}
       height={64}
     />
