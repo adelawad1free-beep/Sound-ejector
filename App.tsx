@@ -19,8 +19,8 @@ import {
   Loader2,
   ChevronDown
 } from 'lucide-react';
-import AudioVisualizer from './components/AudioVisualizer';
-import { exportToPDF, exportToWord } from './services/exportService';
+import AudioVisualizer from './components/AudioVisualizer.tsx';
+import { exportToPDF, exportToWord } from './services/exportService.ts';
 
 const App: React.FC = () => {
   const [text, setText] = useState<string>(() => {
@@ -47,14 +47,12 @@ const App: React.FC = () => {
   const recognitionRef = useRef<any>(null);
   const isStopCommanded = useRef(false);
 
-  // Auto-scroll logic
   useEffect(() => {
     if (isAutoScroll && textareaRef.current) {
       textareaRef.current.scrollTop = textareaRef.current.scrollHeight;
     }
   }, [text, interimText, isAutoScroll]);
 
-  // Initialize Speech Recognition
   useEffect(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     
