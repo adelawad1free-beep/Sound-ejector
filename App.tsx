@@ -1,106 +1,108 @@
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   Play, 
   Pause, 
   Download, 
   FileText, 
-  FileCode, 
   File as FileIcon, 
   Clock, 
   FastForward, 
   Rewind, 
   Volume2, 
   Upload,
-  Keyboard,
   Mic,
   MicOff,
   Trash2,
-  Save,
+  ShieldCheck,
+  AlertCircle,
   CheckCircle2,
-  Info
+  Loader2,
+  ChevronDown
 } from 'lucide-react';
 import AudioVisualizer from './components/AudioVisualizer';
 import { exportToText, exportToPDF, exportToWord } from './services/exportService';
 
-// Speech Recognition Type Definition
-interface SpeechRecognitionEvent extends Event {
-  results: {
-    [key: number]: {
-      [key: number]: {
-        transcript: string;
-      };
-      isFinal: boolean;
-    };
-  };
-}
-
 const App: React.FC = () => {
-  const [text, setText] = useState<string>(() => localStorage.getItem('transcription_draft') || '');
+  const [text, setText] = useState<string>(() => localStorage.getItem('transcription_local') || '');
+  const [interimText, setInterimText] = useState<string>('');
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [audioUrl, setAudioUrl] = useState<string>('');
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [playbackRate, setPlaybackRate] = useState(1);
-  const [isDictating, setIsDictating] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isAutoScroll, setIsAutoScroll] = useState(true);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const recognitionRef = useRef<any>(null);
-  const isIntentionalStop = useRef(false);
+  const isStopCommanded = useRef(false);
+
+  // Auto-scroll logic
+  useEffect(() => {
+    if (isAutoScroll && textareaRef.current) {
+      textareaRef.current.scrollTop = textareaRef.current.scrollHeight;
+    }
+  }, [text, interimText, isAutoScroll]);
 
   // Initialize Speech Recognition
   useEffect(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      recognitionRef.current = new SpeechRecognition();
-      recognitionRef.current.continuous = true;
-      recognitionRef.current.interimResults = true;
-      recognitionRef.current.lang = 'ar-SA';
-
-      recognitionRef.current.onresult = (event: any) => {
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            const transcript = event.results[i][0].transcript;
-            setText(prev => prev.trim() + ' ' + transcript.trim() + ' ');
-          }
-        }
-      };
-
-      recognitionRef.current.onerror = (event: any) => {
-        // البرمجة هنا تعالج خطأ no-speech لضمان عدم توقف البرنامج
-        if (event.error === 'no-speech') {
-          console.log('لم يتم اكتشاف صوت، جاري الاستمرار في وضع الاستماع...');
-          return; // تجاهل الخطأ وعدم تغيير الحالة
-        }
-        
-        if (event.error === 'not-allowed') {
-          alert('يرجى السماح بالوصول للميكروفون من إعدادات المتصفح.');
-          setIsDictating(false);
-        }
-        
-        console.error('Speech recognition error:', event.error);
-      };
-
-      recognitionRef.current.onend = () => {
-        // إذا لم يكن الإيقاف يدوياً، أعد التشغيل برمجياً
-        if (isDictating && !isIntentionalStop.current) {
-          try {
-            recognitionRef.current.start();
-          } catch (e) {
-            console.log('إعادة تشغيل المحرك...');
-          }
-        }
-      };
+    
+    if (!SpeechRecognition) {
+      setErrorMessage("متصفحك لا يدعم خاصية التفريغ البرمجي. يرجى استخدام Google Chrome.");
+      return;
     }
-  }, [isDictating]);
 
-  // Auto-save logic
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'ar-SA';
+
+    recognition.onresult = (event: any) => {
+      let currentInterim = '';
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          setText(prev => (prev.trim() + ' ' + transcript.trim()).trim() + ' ');
+          setInterimText(''); 
+        } else {
+          currentInterim += transcript;
+        }
+      }
+      setInterimText(currentInterim);
+    };
+
+    recognition.onerror = (event: any) => {
+      if (event.error === 'no-speech') return;
+      if (event.error === 'not-allowed') {
+        setErrorMessage("يجب السماح بالوصول للميكروفون لكي يستطيع البرنامج سماع الملف الصوتي.");
+        setIsTranscribing(false);
+      }
+    };
+
+    recognition.onend = () => {
+      if (isTranscribing && !isStopCommanded.current) {
+        try {
+          recognition.start();
+        } catch (e) {
+          setTimeout(() => {
+            if (isTranscribing && !isStopCommanded.current) recognition.start();
+          }, 500);
+        }
+      }
+    };
+
+    recognitionRef.current = recognition;
+  }, [isTranscribing]);
+
   useEffect(() => {
     const timer = setTimeout(() => {
-      localStorage.setItem('transcription_draft', text);
+      localStorage.setItem('transcription_local', text);
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 2000);
     }, 1000);
@@ -108,22 +110,28 @@ const App: React.FC = () => {
     return () => clearTimeout(timer);
   }, [text]);
 
-  const toggleDictation = () => {
-    if (!recognitionRef.current) {
-      alert("عذراً، متصفحك لا يدعم ميزة الإملاء البرمجي. يفضل استخدام متصفح كروم.");
-      return;
-    }
+  const toggleTranscription = () => {
+    if (!recognitionRef.current) return;
 
-    if (isDictating) {
-      isIntentionalStop.current = true;
+    if (isTranscribing) {
+      isStopCommanded.current = true;
       recognitionRef.current.stop();
-      setIsDictating(false);
+      setIsTranscribing(false);
+      setInterimText('');
     } else {
-      isIntentionalStop.current = false;
-      recognitionRef.current.start();
-      setIsDictating(true);
-      // إضافة طابع زمني تلقائي عند بدء الإملاء
-      insertTimestamp();
+      setErrorMessage(null);
+      isStopCommanded.current = false;
+      try {
+        recognitionRef.current.start();
+        setIsTranscribing(true);
+        // Play audio automatically if not playing
+        if (audioRef.current && !isPlaying) {
+          audioRef.current.play();
+          setIsPlaying(true);
+        }
+      } catch (e) {
+        console.error("Failed to start recognition:", e);
+      }
     }
   };
 
@@ -131,312 +139,265 @@ const App: React.FC = () => {
     const file = e.target.files?.[0];
     if (file) {
       setAudioFile(file);
-      const url = URL.createObjectURL(file);
-      setAudioUrl(url);
+      setAudioUrl(URL.createObjectURL(file));
       setIsPlaying(false);
       setCurrentTime(0);
-    }
-  };
-
-  const togglePlay = () => {
-    if (audioRef.current) {
-      if (isPlaying) {
-        audioRef.current.pause();
-        audioRef.current.currentTime = Math.max(0, audioRef.current.currentTime - 1.5);
-      } else {
-        audioRef.current.play();
-      }
-      setIsPlaying(!isPlaying);
-    }
-  };
-
-  const skip = (seconds: number) => {
-    if (audioRef.current) {
-      audioRef.current.currentTime += seconds;
+      setErrorMessage(null);
     }
   };
 
   const formatTime = (time: number) => {
-    const minutes = Math.floor(time / 60);
-    const seconds = Math.floor(time % 60);
-    return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+    const mins = Math.floor(time / 60);
+    const secs = Math.floor(time % 60);
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
-  const insertTimestamp = () => {
-    const timestamp = `\n[${formatTime(currentTime)}] `;
-    setText(prev => prev + timestamp);
-  };
-
-  const clearText = () => {
-    if (window.confirm("هل أنت متأكد من مسح كل النص المكتوب؟")) {
-      setText('');
-      localStorage.removeItem('transcription_draft');
-    }
-  };
+  const progressPercentage = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 pb-12 font-sans">
-      {/* Header */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-50 px-4 md:px-8 py-4 flex flex-wrap items-center justify-between shadow-sm">
+    <div className="min-h-screen bg-[#F8FAFC] flex flex-col font-sans selection:bg-blue-100">
+      {/* Dynamic Header */}
+      <nav className="bg-white/80 backdrop-blur-md border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-indigo-600 rounded-lg flex items-center justify-center text-white shadow-lg shadow-indigo-100">
-            <FileText size={24} />
+          <div className="w-10 h-10 gradient-bg rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-200">
+            <Mic size={22} className={isTranscribing ? 'animate-pulse' : ''} />
           </div>
           <div>
-            <h1 className="text-xl font-extrabold text-slate-800 leading-tight">مدون</h1>
-            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">التفريغ البرمجي المستقر</p>
+            <span className="text-xl font-black text-slate-800 tracking-tight">مُدوِّن <span className="text-blue-600">PRO</span></span>
+            <div className="flex items-center gap-1 text-[10px] text-slate-400 font-bold uppercase tracking-tighter">
+              <ShieldCheck size={10} className="text-blue-500" /> نظام التفريغ المتسلسل
+            </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          {saveStatus === 'saving' && <span className="text-xs text-slate-400 animate-pulse font-bold">جاري المزامنة...</span>}
-          {saveStatus === 'saved' && <span className="text-xs text-green-600 flex items-center gap-1 font-bold"><CheckCircle2 size={12} /> تم الحفظ محلياً</span>}
-          
-          <div className="h-8 w-[1px] bg-slate-200 mx-2 hidden md:block"></div>
-          
-          <div className="flex bg-slate-100 rounded-xl p-1 gap-1">
-             <button 
-              onClick={() => exportToText(text, audioFile?.name || 'تفريغ_مدون')}
-              className="px-3 py-1.5 text-xs font-bold hover:bg-white rounded-lg transition-all flex items-center gap-1.5 text-slate-600"
-             >
-              <FileIcon size={14} /> نص
+        <div className="flex items-center gap-4">
+          <div className="hidden md:flex gap-1 bg-slate-100 p-1 rounded-xl">
+             <button onClick={() => exportToWord(text, audioFile?.name || 'تفريغ')} className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-white rounded-lg transition-all flex items-center gap-2">
+               <FileText size={14} className="text-blue-600" /> تصدير وورد
              </button>
-             <button 
-              onClick={() => exportToWord(text, audioFile?.name || 'تفريغ_مدون')}
-              className="px-3 py-1.5 text-xs font-bold hover:bg-white rounded-lg transition-all flex items-center gap-1.5 text-blue-600"
-             >
-              <FileCode size={14} /> وورد
-             </button>
-             <button 
-              onClick={() => exportToPDF(text, audioFile?.name || 'تفريغ_مدون')}
-              className="px-3 py-1.5 text-xs font-bold hover:bg-white rounded-lg transition-all flex items-center gap-1.5 text-red-600"
-             >
-              <Download size={14} /> PDF
+             <button onClick={() => exportToPDF(text, audioFile?.name || 'تفريغ')} className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-white rounded-lg transition-all flex items-center gap-2">
+               <Download size={14} className="text-red-600" /> PDF
              </button>
           </div>
+          <div className="h-6 w-px bg-slate-200 hidden md:block"></div>
+          <div className="text-[10px] font-bold text-slate-400 min-w-[60px]">
+            {saveStatus === 'saving' ? 'جاري الحفظ...' : 'تم الحفظ'}
+          </div>
         </div>
-      </header>
+      </nav>
 
-      <main className="max-w-7xl mx-auto px-4 md:px-8 py-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
+      {errorMessage && (
+        <div className="bg-red-50 border-b border-red-100 p-3 text-center flex items-center justify-center gap-2 text-red-600 text-sm font-bold animate-in slide-in-from-top">
+          <AlertCircle size={18} />
+          {errorMessage}
+        </div>
+      )}
+
+      {/* Main Grid */}
+      <main className="flex-1 max-w-7xl mx-auto w-full grid grid-cols-1 lg:grid-cols-12 gap-8 p-4 md:p-8">
         
-        {/* Sidebar / Tools */}
-        <aside className="lg:col-span-4 space-y-6">
-          {/* File Upload Area */}
-          <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm transition-all hover:shadow-md">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold flex items-center gap-2">
-                <Upload size={20} className="text-indigo-600" />
-                تحميل الصوت
-              </h2>
-              {audioFile && (
-                <button onClick={() => setAudioFile(null)} className="text-slate-400 hover:text-red-500">
-                  <Trash2 size={16} />
+        {/* Sidebar */}
+        <div className="lg:col-span-4 space-y-6">
+          {/* File Upload Section */}
+          <section className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-200">
+            <h2 className="text-[10px] font-black text-slate-400 mb-4 uppercase tracking-[0.2em] flex items-center gap-2">
+               <Upload size={12} /> مصدر الصوت
+            </h2>
+            <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="audio/*" className="hidden" />
+            {!audioFile ? (
+              <button onClick={() => fileInputRef.current?.click()} className="w-full h-36 border-2 border-dashed border-slate-100 rounded-3xl flex flex-col items-center justify-center gap-3 hover:border-blue-400 hover:bg-blue-50/50 transition-all group">
+                <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-300 group-hover:text-blue-500 group-hover:scale-110 transition-all">
+                  <Upload size={24} />
+                </div>
+                <p className="text-xs font-bold text-slate-500">اختر ملفاً صوتياً (MP3, WAV)</p>
+              </button>
+            ) : (
+              <div className="bg-blue-50/50 border border-blue-100 p-4 rounded-2xl flex items-center justify-between">
+                <div className="flex items-center gap-3 overflow-hidden">
+                  <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shrink-0 shadow-md"><Volume2 size={20} /></div>
+                  <div className="overflow-hidden">
+                    <p className="text-xs font-bold text-slate-700 truncate">{audioFile.name}</p>
+                    <p className="text-[9px] font-bold text-blue-500">{(audioFile.size / 1024 / 1024).toFixed(1)} MB</p>
+                  </div>
+                </div>
+                <button onClick={() => {setAudioFile(null); setAudioUrl('');}} className="w-8 h-8 flex items-center justify-center rounded-full text-slate-300 hover:bg-red-50 hover:text-red-500 transition-all"><Trash2 size={16} /></button>
+              </div>
+            )}
+          </section>
+
+          {audioUrl && (
+            <section className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-200 space-y-8 relative overflow-hidden">
+               <AudioVisualizer audioElement={audioRef.current} />
+               
+               <div className="space-y-6">
+                  <div className="flex items-center justify-between text-[11px] font-black text-slate-500 tabular-nums">
+                    <span className="bg-slate-100 px-2 py-1 rounded-lg">{formatTime(currentTime)}</span>
+                    <span className="bg-slate-100 px-2 py-1 rounded-lg">{formatTime(duration)}</span>
+                  </div>
+                  
+                  {/* Enhanced Progress Bar */}
+                  <div className="relative h-2 bg-slate-100 rounded-full overflow-hidden group">
+                    <div 
+                      className={`absolute top-0 right-0 h-full transition-all duration-300 ${isTranscribing ? 'bg-blue-600' : 'bg-slate-400'}`}
+                      style={{ width: `${progressPercentage}%` }}
+                    >
+                      {isTranscribing && <div className="absolute left-0 top-0 h-full w-20 bg-gradient-to-r from-transparent to-white/30 animate-shimmer"></div>}
+                    </div>
+                    <input 
+                      type="range" 
+                      min="0" 
+                      max={duration || 0} 
+                      value={currentTime} 
+                      onChange={(e) => audioRef.current && (audioRef.current.currentTime = parseFloat(e.target.value))} 
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-center gap-10">
+                    <button onClick={() => audioRef.current && (audioRef.current.currentTime -= 10)} className="text-slate-300 hover:text-blue-600 transition-all active:scale-90"><Rewind size={28} /></button>
+                    <button 
+                      onClick={() => {
+                        if (audioRef.current) {
+                          if (isPlaying) audioRef.current.pause();
+                          else audioRef.current.play();
+                          setIsPlaying(!isPlaying);
+                        }
+                      }} 
+                      className="w-20 h-20 gradient-bg rounded-full flex items-center justify-center text-white shadow-2xl shadow-blue-200 hover:scale-105 active:scale-95 transition-all"
+                    >
+                      {isPlaying ? <Pause size={32} fill="currentColor" /> : <Play size={32} fill="currentColor" className="mr-1" />}
+                    </button>
+                    <button onClick={() => audioRef.current && (audioRef.current.currentTime += 10)} className="text-slate-300 hover:text-blue-600 transition-all active:scale-90"><FastForward size={28} /></button>
+                  </div>
+
+                  <div className="pt-4">
+                    <button 
+                      onClick={toggleTranscription} 
+                      className={`w-full flex flex-col items-center justify-center gap-1 py-4 px-6 rounded-3xl text-sm font-bold transition-all shadow-xl ${
+                        isTranscribing 
+                        ? 'bg-red-500 text-white recording-pulse' 
+                        : 'bg-slate-900 text-white hover:bg-black'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        {isTranscribing ? <MicOff size={20} /> : <Mic size={20} />}
+                        <span>{isTranscribing ? 'إيقاف التفريغ الآلي' : 'بدء التفريغ البرمجي'}</span>
+                      </div>
+                      {isTranscribing && <span className="text-[10px] opacity-80 font-medium">النظام يستمع للملف الآن...</span>}
+                    </button>
+                  </div>
+               </div>
+               
+               <audio 
+                ref={audioRef} 
+                src={audioUrl} 
+                onTimeUpdate={() => audioRef.current && setCurrentTime(audioRef.current.currentTime)} 
+                onLoadedMetadata={() => audioRef.current && setDuration(audioRef.current.duration)} 
+                onEnded={() => setIsPlaying(false)} 
+                className="hidden" 
+               />
+            </section>
+          )}
+
+          <div className="bg-white p-6 rounded-[2.5rem] border border-slate-200">
+             <div className="flex items-center gap-3 mb-4">
+                <div className="w-8 h-8 rounded-full bg-green-50 flex items-center justify-center text-green-600"><CheckCircle2 size={16}/></div>
+                <h3 className="text-xs font-black text-slate-700">التفريغ المتتالي</h3>
+             </div>
+             <p className="text-[11px] leading-loose text-slate-500 font-medium">
+                سيظهر النص في الجهة المقابلة بشكل آلي مع تقدم الصوت. يمكنك تعديل النص يدوياً في أي وقت. الموقع يحفظ مسودتك تلقائياً كل ثانية.
+             </p>
+          </div>
+        </div>
+
+        {/* Editor Main Area */}
+        <div className="lg:col-span-8 flex flex-col gap-4">
+          <div className="bg-white flex-1 rounded-[3rem] border border-slate-200 shadow-sm flex flex-col overflow-hidden min-h-[600px] transition-all relative">
+            
+            {/* Toolbar */}
+            <div className="bg-slate-50/50 border-b border-slate-200 px-10 py-5 flex items-center justify-between">
+               <div className="flex items-center gap-4">
+                 <div className="flex items-center gap-2">
+                    <div className={`w-2.5 h-2.5 rounded-full ${isTranscribing ? 'bg-red-500 animate-pulse' : 'bg-slate-300'}`}></div>
+                    <h3 className="text-xs font-black text-slate-700 uppercase tracking-widest">المحرر الذكي</h3>
+                 </div>
+                 {isTranscribing && (
+                   <div className="flex items-center gap-2 text-[10px] font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
+                     <Loader2 size={12} className="animate-spin" />
+                     <span>جاري الكتابة بالتوالي...</span>
+                   </div>
+                 )}
+               </div>
+               
+               <div className="flex items-center gap-2">
+                 <button 
+                  onClick={() => setIsAutoScroll(!isAutoScroll)} 
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px] font-bold transition-all ${isAutoScroll ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}
+                  title="التمرير التلقائي لآخر جملة"
+                 >
+                   التمرير التلقائي {isAutoScroll ? 'مفعل' : 'معطل'}
+                 </button>
+                 <button 
+                  onClick={() => { if(window.confirm('مسح النص بالكامل؟')) setText(''); }} 
+                  className="p-2 text-slate-300 hover:text-red-500 transition-colors"
+                 >
+                   <Trash2 size={18} />
+                 </button>
+               </div>
+            </div>
+            
+            {/* Textarea Container */}
+            <div className="flex-1 flex flex-col relative group">
+              <textarea
+                ref={textareaRef}
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder="ابدأ تشغيل الملف الصوتي بعد تفعيل زر التفريغ ليظهر النص هنا جملةً بجملة..."
+                className="flex-1 w-full p-12 text-xl md:text-2xl leading-[2] text-slate-800 focus:outline-none resize-none bg-transparent placeholder:text-slate-200 custom-scrollbar scroll-smooth"
+                dir="rtl"
+              />
+              
+              {/* Live Streaming Text Block */}
+              {interimText && (
+                <div className="absolute bottom-10 left-12 right-12 p-6 bg-slate-900/95 text-white rounded-[2rem] text-xl shadow-2xl backdrop-blur-xl animate-in fade-in slide-in-from-bottom-4 border border-white/10">
+                  <div className="flex items-center gap-3 mb-2 opacity-50">
+                    <div className="flex gap-1">
+                      <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce"></div>
+                      <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce [animation-delay:0.2s]"></div>
+                      <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce [animation-delay:0.4s]"></div>
+                    </div>
+                    <span className="text-[10px] font-bold uppercase tracking-widest">معالجة فورية</span>
+                  </div>
+                  <span className="leading-relaxed font-medium">{interimText}</span>
+                </div>
+              )}
+
+              {/* Scroll indicator if not at bottom */}
+              {!isAutoScroll && text.length > 500 && (
+                <button 
+                  onClick={() => setIsAutoScroll(true)}
+                  className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 text-xs font-bold hover:scale-110 transition-all z-20"
+                >
+                  <ChevronDown size={14} /> النزول للأسفل
                 </button>
               )}
             </div>
-            
-            <input 
-              type="file" 
-              ref={fileInputRef}
-              onChange={handleFileUpload}
-              accept="audio/*"
-              className="hidden" 
-            />
-            
-            {!audioFile ? (
-              <button 
-                onClick={() => fileInputRef.current?.click()}
-                className="w-full border-2 border-dashed border-slate-200 rounded-2xl p-8 flex flex-col items-center justify-center gap-3 hover:border-indigo-400 hover:bg-indigo-50 transition-all group"
-              >
-                <div className="w-14 h-14 bg-slate-50 rounded-full flex items-center justify-center text-slate-400 group-hover:bg-indigo-100 group-hover:text-indigo-500 transition-colors">
-                  <Upload size={28} />
-                </div>
-                <span className="text-sm font-bold text-slate-600">اختر ملفاً صوتياً</span>
-                <p className="text-[11px] text-slate-400 text-center">يعمل محلياً بالكامل لضمان خصوصيتك</p>
-              </button>
-            ) : (
-              <div className="flex items-center gap-3 p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
-                <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shrink-0">
-                  <Volume2 size={20} />
-                </div>
-                <div className="overflow-hidden text-right">
-                  <p className="text-sm font-bold text-indigo-900 truncate">{audioFile.name}</p>
-                  <p className="text-[10px] text-indigo-400 font-bold uppercase">{Math.round(audioFile.size / 1024 / 1024 * 100) / 100} MB</p>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Player & Programmatic Controls */}
-          {audioUrl && (
-            <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm sticky top-24">
-              <AudioVisualizer audioElement={audioRef.current} />
-
-              <div className="mt-6 space-y-6">
-                {/* Progress Bar */}
-                <div className="space-y-2">
-                  <div className="flex justify-between text-[11px] font-black text-slate-400 tabular-nums">
-                    <span>{formatTime(currentTime)}</span>
-                    <span>{formatTime(duration)}</span>
-                  </div>
-                  <input 
-                    type="range"
-                    min="0"
-                    max={duration || 0}
-                    value={currentTime}
-                    onChange={(e) => {
-                      const time = parseFloat(e.target.value);
-                      if (audioRef.current) audioRef.current.currentTime = time;
-                    }}
-                    className="w-full h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                  />
-                </div>
-
-                {/* Main Controls */}
-                <div className="flex items-center justify-center gap-6">
-                  <button onClick={() => skip(-5)} className="p-3 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-all">
-                    <Rewind size={26} />
-                  </button>
-                  <button 
-                    onClick={togglePlay}
-                    className="w-16 h-16 bg-indigo-600 rounded-full flex items-center justify-center text-white shadow-xl shadow-indigo-200 hover:bg-indigo-700 hover:scale-105 transition-all"
-                  >
-                    {isPlaying ? <Pause size={32} fill="currentColor" /> : <Play size={32} fill="currentColor" className="mr-1" />}
-                  </button>
-                  <button onClick={() => skip(5)} className="p-3 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-all">
-                    <FastForward size={26} />
-                  </button>
-                </div>
-
-                {/* Speed Controls */}
-                <div className="grid grid-cols-5 gap-1 p-1 bg-slate-100 rounded-xl">
-                  {[0.75, 1, 1.25, 1.5, 2].map((rate) => (
-                    <button
-                      key={rate}
-                      onClick={() => {
-                        setPlaybackRate(rate);
-                        if (audioRef.current) audioRef.current.playbackRate = rate;
-                      }}
-                      className={`py-1.5 text-[10px] font-black rounded-lg transition-all ${
-                        playbackRate === rate ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'
-                      }`}
-                    >
-                      {rate}x
-                    </button>
-                  ))}
-                </div>
-
-                {/* Programmatic Shortcuts */}
-                <div className="grid grid-cols-2 gap-3">
-                  <button 
-                    onClick={insertTimestamp}
-                    className="flex items-center justify-center gap-2 py-3 bg-slate-800 text-white rounded-2xl text-xs font-bold hover:bg-slate-900 transition-all shadow-sm"
-                  >
-                    <Clock size={16} />
-                    طابع زمني
-                  </button>
-                  <button 
-                    onClick={toggleDictation}
-                    className={`relative flex items-center justify-center gap-2 py-3 rounded-2xl text-xs font-bold transition-all ${
-                      isDictating ? 'bg-red-500 text-white mic-active shadow-lg shadow-red-200' : 'bg-white border-2 border-slate-200 text-slate-600 hover:border-indigo-600 hover:text-indigo-600'
-                    }`}
-                  >
-                    {isDictating ? <MicOff size={16} /> : <Mic size={16} />}
-                    {isDictating ? 'إيقاف الإملاء' : 'إملاء تلقائي'}
-                  </button>
-                </div>
-              </div>
-
-              <audio 
-                ref={audioRef}
-                src={audioUrl}
-                onTimeUpdate={() => audioRef.current && setCurrentTime(audioRef.current.currentTime)}
-                onLoadedMetadata={() => audioRef.current && setDuration(audioRef.current.duration)}
-                onEnded={() => setIsPlaying(false)}
-                className="hidden"
-              />
-            </div>
-          )}
-
-          {/* Instructions Card */}
-          <div className="bg-indigo-600 text-white p-6 rounded-3xl shadow-lg relative overflow-hidden">
-            <div className="relative z-10">
-              <h3 className="font-bold mb-3 flex items-center gap-2 text-sm uppercase tracking-widest">
-                <Keyboard size={18} />
-                نظام التفريغ الذكي
-              </h3>
-              <ul className="text-xs space-y-3 font-medium opacity-90">
-                <li className="flex gap-2"><span>•</span> ميزة <b>الإملاء التلقائي</b> الآن أكثر استقراراً وتتجاوز فترات الصمت.</li>
-                <li className="flex gap-2"><span>•</span> عند الضغط على <b>إيقاف</b>، سيعود الصوت تلقائياً 1.5 ثانية للخلف.</li>
-                <li className="flex gap-2"><span>•</span> يتم حفظ عملك في <b>ذاكرة المتصفح</b> تلقائياً كل ثانية.</li>
-              </ul>
-            </div>
-            <div className="absolute top-0 right-0 w-24 h-24 bg-white/10 rounded-full -translate-y-12 translate-x-12"></div>
-          </div>
-        </aside>
-
-        {/* Editor Area */}
-        <section className="lg:col-span-8 flex flex-col h-[calc(100vh-12rem)] min-h-[600px]">
-          <div className="bg-white flex flex-col h-full rounded-3xl border border-slate-200 shadow-sm overflow-hidden focus-within:ring-2 focus-within:ring-indigo-100 transition-all">
-            <div className="bg-slate-50/50 border-b border-slate-200 px-6 py-4 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className={`w-3 h-3 rounded-full ${isDictating ? 'bg-red-500 animate-pulse' : 'bg-green-500'}`}></div>
-                <span className="text-xs font-black text-slate-500 uppercase tracking-tighter">
-                  {isDictating ? 'جاري الاستماع...' : 'محرر النصوص النشط'}
-                </span>
-              </div>
-              <div className="flex gap-4">
-                 <div className="text-xs text-slate-400 font-bold bg-white px-3 py-1 rounded-full border border-slate-100">
-                  {text.split(/\s+/).filter(Boolean).length} كلمة
-                 </div>
-                 <button onClick={clearText} className="text-slate-400 hover:text-red-500 transition-colors" title="مسح النص">
-                    <Trash2 size={16} />
-                 </button>
-              </div>
-            </div>
-            
-            <textarea
-              className="flex-1 p-8 text-xl leading-[1.8] text-slate-700 focus:outline-none resize-none bg-transparent placeholder:text-slate-200 placeholder:font-light custom-scrollbar"
-              placeholder="ابدأ الكتابة هنا... اضغط 'إملاء تلقائي' لتحويل صوتك إلى نص فوراً وبثبات عالي."
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              dir="rtl"
-            />
           </div>
           
-          <div className="mt-4 flex items-center gap-2 text-[11px] text-slate-400 bg-slate-100/50 p-3 rounded-xl border border-slate-200/50">
-            <Info size={14} className="text-indigo-400 shrink-0" />
-            <p>برمجة "مدون" تضمن استمرارية الإملاء حتى في فترات الصمت الطويلة. يتم معالجة كل شيء داخل جهازك.</p>
+          <div className="flex justify-between items-center text-[11px] font-bold text-slate-400 px-6 bg-white/50 py-3 rounded-2xl border border-slate-100">
+            <div className="flex items-center gap-6">
+              <span className="flex items-center gap-2"><Clock size={14}/> الكلمات: {text.trim() === '' ? 0 : text.split(/\s+/).filter(Boolean).length}</span>
+              <span className="flex items-center gap-2">الدقة: عالية (محلي)</span>
+            </div>
+            <div className="flex items-center gap-2">
+               <span className="text-blue-600">Web Speech Engine v2.5</span>
+            </div>
           </div>
-        </section>
+        </div>
       </main>
-
-      {/* SEO Footer */}
-      <footer className="max-w-7xl mx-auto px-4 md:px-8 mt-12 grid grid-cols-1 md:grid-cols-3 gap-12 border-t border-slate-200 pt-12 text-slate-500 pb-8">
-        <div className="space-y-4">
-          <div className="flex items-center gap-2 text-slate-800">
-             <div className="w-8 h-8 bg-slate-800 rounded flex items-center justify-center text-white"><FileText size={18}/></div>
-             <span className="font-black text-lg">مدون</span>
-          </div>
-          <p className="text-sm leading-relaxed text-right">أداة احترافية تهدف لتبسيط عملية التفريغ الصوتي العربي برمجياً، تجمع بين الدقة اليدوية وسرعة التعرف الآلي المدمج في المتصفح.</p>
-        </div>
-        <div className="space-y-4">
-          <h4 className="font-black text-slate-800 uppercase tracking-widest text-sm text-right">أدوات المترجم</h4>
-          <ul className="text-sm space-y-2 font-medium text-right">
-            <li className="hover:text-indigo-600 cursor-default">• تفريغ صوتي آلي مستقر وبدون انقطاع.</li>
-            <li className="hover:text-indigo-600 cursor-default">• إدراج الطوابع الزمنية لتنظيم العمل.</li>
-            <li className="hover:text-indigo-600 cursor-default">• تصدير بصيغ Word و PDF متوافقة مع العربية.</li>
-          </ul>
-        </div>
-        <div className="space-y-4">
-          <h4 className="font-black text-slate-800 uppercase tracking-widest text-sm text-right">الخصوصية الرقمية</h4>
-          <p className="text-sm leading-relaxed text-right">لا يتم تخزين أي بيانات على خوادمنا. يعتمد البرنامج على ذاكرة المتصفح المحلية وتقنيات الويب الحديثة لضمان أمان محتواك الصوتي.</p>
-          <div className="flex gap-2 justify-end">
-            <span className="px-2 py-1 bg-slate-200 text-[10px] rounded font-bold">Secure</span>
-            <span className="px-2 py-1 bg-slate-200 text-[10px] rounded font-bold">Local Storage</span>
-            <span className="px-2 py-1 bg-slate-200 text-[10px] rounded font-bold">Client-Side</span>
-          </div>
-        </div>
+      
+      <footer className="py-6 text-center text-[9px] font-black text-slate-300 uppercase tracking-[0.3em]">
+        جميع الحقوق محفوظة - منصة مدون للتفريغ المتتالي
       </footer>
     </div>
   );

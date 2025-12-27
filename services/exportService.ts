@@ -6,40 +6,51 @@ export const exportToText = (text: string, fileName: string) => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `${fileName || 'transcription'}.txt`;
+  link.download = `${fileName || 'تفريغ_صوتي'}.txt`;
   link.click();
   URL.revokeObjectURL(url);
 };
 
 export const exportToPDF = (text: string, fileName: string) => {
-  const doc = new jsPDF();
+  const doc = new jsPDF({
+    orientation: 'p',
+    unit: 'mm',
+    format: 'a4',
+  });
   
-  // Note: Standard jsPDF has limited RTL support without custom fonts.
-  // In a real production app, we would load a font like Tajawal.
-  // For this demo, we'll provide the content in a structured way.
-  doc.text("تفريغ صوتي من منصة مدون", 105, 10, { align: 'center' });
-  const splitText = doc.splitTextToSize(text, 180);
-  doc.text(splitText, 190, 20, { align: 'right' });
-  doc.save(`${fileName || 'transcription'}.pdf`);
+  // Note: For full Arabic support in jsPDF, one would normally embed a font.
+  // Here we use standard settings and a professional header.
+  doc.setFontSize(22);
+  doc.text("تقرير تفريغ صوتي - منصة مدون", 105, 20, { align: 'center' });
+  
+  doc.setFontSize(12);
+  const margin = 20;
+  const width = 170;
+  const splitText = doc.splitTextToSize(text, width);
+  
+  doc.text(splitText, 190, 40, { align: 'right' });
+  doc.save(`${fileName || 'تفريغ_مدون'}.pdf`);
 };
 
 export const exportToWord = (text: string, fileName: string) => {
   const header = `<html xmlns:o='urn:schemas-microsoft-com:office:office' 
         xmlns:w='urn:schemas-microsoft-com:office:word' 
         xmlns='http://www.w3.org/TR/REC-html40'>
-        <head><meta charset='utf-8'><title>Export Word</title>
+        <head><meta charset='utf-8'><title>تفريغ صوتي من مدون</title>
         <style>
-        body { font-family: 'Arial', sans-serif; direction: rtl; }
+        body { font-family: 'Arial', sans-serif; direction: rtl; text-align: right; }
+        .header { text-align: center; border-bottom: 2px solid #2563eb; padding-bottom: 10px; margin-bottom: 20px; color: #1e3a8a; }
         </style>
-        </head><body>`;
-  const footer = "</body></html>";
-  const sourceHTML = header + text.replace(/\n/g, '<br>') + footer;
+        </head><body>
+        <div class="header"><h1>منصة مدون للتفريغ الصوتي</h1></div>
+        <p>${text.replace(/\n/g, '<br>')}</p>
+        </body></html>`;
   
-  const source = 'data:application/vnd.ms-word;charset=utf-8,' + encodeURIComponent(sourceHTML);
-  const fileDownload = document.createElement("a");
-  document.body.appendChild(fileDownload);
-  fileDownload.href = source;
-  fileDownload.download = `${fileName || 'transcription'}.doc`;
-  fileDownload.click();
-  document.body.removeChild(fileDownload);
+  const blob = new Blob([header], { type: 'application/msword;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${fileName || 'تفريغ_مدون'}.doc`;
+  link.click();
+  URL.revokeObjectURL(url);
 };
