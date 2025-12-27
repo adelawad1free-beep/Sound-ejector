@@ -5,7 +5,6 @@ import {
   Pause, 
   Download, 
   FileText, 
-  File as FileIcon, 
   Clock, 
   FastForward, 
   Rewind, 
@@ -21,10 +20,16 @@ import {
   ChevronDown
 } from 'lucide-react';
 import AudioVisualizer from './components/AudioVisualizer';
-import { exportToText, exportToPDF, exportToWord } from './services/exportService';
+import { exportToPDF, exportToWord } from './services/exportService';
 
 const App: React.FC = () => {
-  const [text, setText] = useState<string>(() => localStorage.getItem('transcription_local') || '');
+  const [text, setText] = useState<string>(() => {
+    try {
+      return localStorage.getItem('transcription_local') || '';
+    } catch {
+      return '';
+    }
+  });
   const [interimText, setInterimText] = useState<string>('');
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [audioUrl, setAudioUrl] = useState<string>('');
@@ -54,7 +59,7 @@ const App: React.FC = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     
     if (!SpeechRecognition) {
-      setErrorMessage("متصفحك لا يدعم خاصية التفريغ البرمجي. يرجى استخدام Google Chrome.");
+      setErrorMessage("عذراً، متصفحك لا يدعم خاصية التفريغ البرمجي. يرجى استخدام متصفح Google Chrome.");
       return;
     }
 
@@ -80,7 +85,7 @@ const App: React.FC = () => {
     recognition.onerror = (event: any) => {
       if (event.error === 'no-speech') return;
       if (event.error === 'not-allowed') {
-        setErrorMessage("يجب السماح بالوصول للميكروفون لكي يستطيع البرنامج سماع الملف الصوتي.");
+        setErrorMessage("يجب السماح بالوصول للميكروفون من إعدادات المتصفح للبدء.");
         setIsTranscribing(false);
       }
     };
@@ -102,9 +107,13 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      localStorage.setItem('transcription_local', text);
-      setSaveStatus('saved');
-      setTimeout(() => setSaveStatus('idle'), 2000);
+      try {
+        localStorage.setItem('transcription_local', text);
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus('idle'), 2000);
+      } catch (e) {
+        console.error("Storage error:", e);
+      }
     }, 1000);
     setSaveStatus('saving');
     return () => clearTimeout(timer);
@@ -124,13 +133,12 @@ const App: React.FC = () => {
       try {
         recognitionRef.current.start();
         setIsTranscribing(true);
-        // Play audio automatically if not playing
         if (audioRef.current && !isPlaying) {
-          audioRef.current.play();
+          audioRef.current.play().catch(console.error);
           setIsPlaying(true);
         }
       } catch (e) {
-        console.error("Failed to start recognition:", e);
+        console.error("Start recognition failed:", e);
       }
     }
   };
@@ -138,6 +146,7 @@ const App: React.FC = () => {
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (audioUrl) URL.revokeObjectURL(audioUrl);
       setAudioFile(file);
       setAudioUrl(URL.createObjectURL(file));
       setIsPlaying(false);
@@ -156,7 +165,6 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex flex-col font-sans selection:bg-blue-100">
-      {/* Dynamic Header */}
       <nav className="bg-white/80 backdrop-blur-md border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 gradient-bg rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-200">
@@ -173,7 +181,7 @@ const App: React.FC = () => {
         <div className="flex items-center gap-4">
           <div className="hidden md:flex gap-1 bg-slate-100 p-1 rounded-xl">
              <button onClick={() => exportToWord(text, audioFile?.name || 'تفريغ')} className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-white rounded-lg transition-all flex items-center gap-2">
-               <FileText size={14} className="text-blue-600" /> تصدير وورد
+               <FileText size={14} className="text-blue-600" /> وورد
              </button>
              <button onClick={() => exportToPDF(text, audioFile?.name || 'تفريغ')} className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-white rounded-lg transition-all flex items-center gap-2">
                <Download size={14} className="text-red-600" /> PDF
@@ -193,12 +201,8 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Main Grid */}
       <main className="flex-1 max-w-7xl mx-auto w-full grid grid-cols-1 lg:grid-cols-12 gap-8 p-4 md:p-8">
-        
-        {/* Sidebar */}
         <div className="lg:col-span-4 space-y-6">
-          {/* File Upload Section */}
           <section className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-200">
             <h2 className="text-[10px] font-black text-slate-400 mb-4 uppercase tracking-[0.2em] flex items-center gap-2">
                <Upload size={12} /> مصدر الصوت
@@ -209,7 +213,7 @@ const App: React.FC = () => {
                 <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-300 group-hover:text-blue-500 group-hover:scale-110 transition-all">
                   <Upload size={24} />
                 </div>
-                <p className="text-xs font-bold text-slate-500">اختر ملفاً صوتياً (MP3, WAV)</p>
+                <p className="text-xs font-bold text-slate-500">اختر ملفاً صوتياً للبدء</p>
               </button>
             ) : (
               <div className="bg-blue-50/50 border border-blue-100 p-4 rounded-2xl flex items-center justify-between">
@@ -235,7 +239,6 @@ const App: React.FC = () => {
                     <span className="bg-slate-100 px-2 py-1 rounded-lg">{formatTime(duration)}</span>
                   </div>
                   
-                  {/* Enhanced Progress Bar */}
                   <div className="relative h-2 bg-slate-100 rounded-full overflow-hidden group">
                     <div 
                       className={`absolute top-0 right-0 h-full transition-all duration-300 ${isTranscribing ? 'bg-blue-600' : 'bg-slate-400'}`}
@@ -258,8 +261,11 @@ const App: React.FC = () => {
                     <button 
                       onClick={() => {
                         if (audioRef.current) {
-                          if (isPlaying) audioRef.current.pause();
-                          else audioRef.current.play();
+                          if (isPlaying) {
+                            audioRef.current.pause();
+                          } else {
+                            audioRef.current.play().catch(console.error);
+                          }
                           setIsPlaying(!isPlaying);
                         }
                       }} 
@@ -281,9 +287,8 @@ const App: React.FC = () => {
                     >
                       <div className="flex items-center gap-2">
                         {isTranscribing ? <MicOff size={20} /> : <Mic size={20} />}
-                        <span>{isTranscribing ? 'إيقاف التفريغ الآلي' : 'بدء التفريغ البرمجي'}</span>
+                        <span>{isTranscribing ? 'إيقاف التفريغ' : 'بدء التفريغ البرمجي'}</span>
                       </div>
-                      {isTranscribing && <span className="text-[10px] opacity-80 font-medium">النظام يستمع للملف الآن...</span>}
                     </button>
                   </div>
                </div>
@@ -304,17 +309,12 @@ const App: React.FC = () => {
                 <div className="w-8 h-8 rounded-full bg-green-50 flex items-center justify-center text-green-600"><CheckCircle2 size={16}/></div>
                 <h3 className="text-xs font-black text-slate-700">التفريغ المتتالي</h3>
              </div>
-             <p className="text-[11px] leading-loose text-slate-500 font-medium">
-                سيظهر النص في الجهة المقابلة بشكل آلي مع تقدم الصوت. يمكنك تعديل النص يدوياً في أي وقت. الموقع يحفظ مسودتك تلقائياً كل ثانية.
-             </p>
+             <p className="text-[11px] text-slate-500 font-medium">سيظهر النص في الجهة المقابلة بشكل آلي مع تقدم الصوت. يمكنك تعديل النص يدوياً في أي وقت.</p>
           </div>
         </div>
 
-        {/* Editor Main Area */}
         <div className="lg:col-span-8 flex flex-col gap-4">
-          <div className="bg-white flex-1 rounded-[3rem] border border-slate-200 shadow-sm flex flex-col overflow-hidden min-h-[600px] transition-all relative">
-            
-            {/* Toolbar */}
+          <div className="bg-white flex-1 rounded-[3rem] border border-slate-200 shadow-sm flex flex-col overflow-hidden min-h-[600px] relative">
             <div className="bg-slate-50/50 border-b border-slate-200 px-10 py-5 flex items-center justify-between">
                <div className="flex items-center gap-4">
                  <div className="flex items-center gap-2">
@@ -332,73 +332,42 @@ const App: React.FC = () => {
                <div className="flex items-center gap-2">
                  <button 
                   onClick={() => setIsAutoScroll(!isAutoScroll)} 
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px] font-bold transition-all ${isAutoScroll ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}
-                  title="التمرير التلقائي لآخر جملة"
+                  className={`px-3 py-1.5 rounded-full text-[10px] font-bold transition-all ${isAutoScroll ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}
                  >
                    التمرير التلقائي {isAutoScroll ? 'مفعل' : 'معطل'}
                  </button>
-                 <button 
-                  onClick={() => { if(window.confirm('مسح النص بالكامل؟')) setText(''); }} 
-                  className="p-2 text-slate-300 hover:text-red-500 transition-colors"
-                 >
-                   <Trash2 size={18} />
-                 </button>
+                 <button onClick={() => { if(window.confirm('مسح النص؟')) setText(''); }} className="p-2 text-slate-300 hover:text-red-500"><Trash2 size={18} /></button>
                </div>
             </div>
             
-            {/* Textarea Container */}
-            <div className="flex-1 flex flex-col relative group">
+            <div className="flex-1 flex flex-col relative">
               <textarea
                 ref={textareaRef}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                placeholder="ابدأ تشغيل الملف الصوتي بعد تفعيل زر التفريغ ليظهر النص هنا جملةً بجملة..."
-                className="flex-1 w-full p-12 text-xl md:text-2xl leading-[2] text-slate-800 focus:outline-none resize-none bg-transparent placeholder:text-slate-200 custom-scrollbar scroll-smooth"
+                placeholder="ابدأ تشغيل الملف الصوتي ليظهر النص هنا..."
+                className="flex-1 w-full p-12 text-xl md:text-2xl leading-[2] text-slate-800 focus:outline-none resize-none bg-transparent custom-scrollbar"
                 dir="rtl"
               />
               
-              {/* Live Streaming Text Block */}
               {interimText && (
-                <div className="absolute bottom-10 left-12 right-12 p-6 bg-slate-900/95 text-white rounded-[2rem] text-xl shadow-2xl backdrop-blur-xl animate-in fade-in slide-in-from-bottom-4 border border-white/10">
-                  <div className="flex items-center gap-3 mb-2 opacity-50">
-                    <div className="flex gap-1">
-                      <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce"></div>
-                      <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce [animation-delay:0.2s]"></div>
-                      <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce [animation-delay:0.4s]"></div>
-                    </div>
-                    <span className="text-[10px] font-bold uppercase tracking-widest">معالجة فورية</span>
-                  </div>
+                <div className="absolute bottom-10 left-12 right-12 p-6 bg-slate-900/95 text-white rounded-[2rem] text-xl shadow-2xl backdrop-blur-xl border border-white/10">
                   <span className="leading-relaxed font-medium">{interimText}</span>
                 </div>
               )}
 
-              {/* Scroll indicator if not at bottom */}
               {!isAutoScroll && text.length > 500 && (
                 <button 
                   onClick={() => setIsAutoScroll(true)}
-                  className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 text-xs font-bold hover:scale-110 transition-all z-20"
+                  className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 text-xs font-bold transition-all"
                 >
                   <ChevronDown size={14} /> النزول للأسفل
                 </button>
               )}
             </div>
           </div>
-          
-          <div className="flex justify-between items-center text-[11px] font-bold text-slate-400 px-6 bg-white/50 py-3 rounded-2xl border border-slate-100">
-            <div className="flex items-center gap-6">
-              <span className="flex items-center gap-2"><Clock size={14}/> الكلمات: {text.trim() === '' ? 0 : text.split(/\s+/).filter(Boolean).length}</span>
-              <span className="flex items-center gap-2">الدقة: عالية (محلي)</span>
-            </div>
-            <div className="flex items-center gap-2">
-               <span className="text-blue-600">Web Speech Engine v2.5</span>
-            </div>
-          </div>
         </div>
       </main>
-      
-      <footer className="py-6 text-center text-[9px] font-black text-slate-300 uppercase tracking-[0.3em]">
-        جميع الحقوق محفوظة - منصة مدون للتفريغ المتتالي
-      </footer>
     </div>
   );
 };
